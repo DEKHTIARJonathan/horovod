@@ -56,7 +56,8 @@ model = getattr(applications, args.model)(weights=None)
 opt = tf.train.GradientDescentOptimizer(0.01)
 
 # Horovod: (optional) compression algorithm.
-compression = hvd.Compression.fp16 if args.fp16_allreduce else hvd.Compression.none
+# compression = hvd.Compression.fp16 if args.fp16_allreduce else hvd.Compression.none
+compression = hvd.Compression.sparse
 
 # Horovod: wrap optimizer with DistributedOptimizer.
 opt = hvd.DistributedOptimizer(opt, compression=compression)

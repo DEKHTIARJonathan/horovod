@@ -43,6 +43,34 @@ class NoneCompressor(Compressor):
         return tensor
 
 
+class SparseCompressor(Compressor):
+    sparse_threshold = 1e-3
+
+    """Compress all gradients to a sparse gradient"""
+    @staticmethod
+    def compress(tensor):
+        """Downcasts the tensor to 16-bit."""
+        tensor_compressed = tensor
+        # return tensor_compressed, tensor_compressed.dtype
+
+        if tensor.dtype.is_floating:
+            idx = tf.where(tf.math.greater(tensor, SparseCompressor.sparse_threshold))
+            tensor_compressed = tf.SparseTensor(idx, tf.gather_nd(tensor, idx), tensor.get_shape())
+        return tensor_compressed, tensor_compressed.dtype
+
+    @staticmethod
+    def decompress(tensor, ctx):
+        """Upcasts the tensor to the initialization dtype."""
+        tensor_decompressed = tensor
+
+        print(type(tensor))
+
+        if isinstance(tensor, tf.SparseTensor):
+            tensor_decompressed = tf.sparse_tensor_to_dense(tensor)
+
+        return tensor_decompressed
+
+
 class FP16Compressor(Compressor):
     """Compress all floating point gradients to 16-bit."""
     @staticmethod
@@ -72,3 +100,7 @@ class Compression(object):
 
     """Compress all floating point gradients to 16-bit."""
     fp16 = FP16Compressor
+
+    """Sparse Compression"""
+    sparse = SparseCompressor
+    sparse_threshold = 1e-3

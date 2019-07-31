@@ -74,8 +74,19 @@ def _allreduce(tensor, name=None):
       A tensor of the same shape and type as `tensor`, summed across all
       processes.
     """
-    if name is None and not _executing_eagerly():
-        name = 'HorovodAllreduce_%s' % _normalize_name(tensor.name)
+    if not _executing_eagerly():
+
+        if name is None:
+            name = tensor.name
+
+        name = 'HorovodAllgather_%s' % _normalize_name(name)
+
+    print("NAME:", name)
+    print("NAME:", name)
+    print("NAME:", name)
+    print("NAME:", name)
+    print("NAME:", name)
+
     return MPI_LIB.horovod_allreduce(tensor, name=name)
 
 
@@ -108,7 +119,10 @@ def allgather(tensor, name=None):
       dimensions of the tensors in different Horovod processes.
     """
     if name is None and not _executing_eagerly():
-        name = 'HorovodAllgather_%s' % _normalize_name(tensor.name)
+        name = tensor.name
+
+    name = 'HorovodAllgather_%s' % _normalize_name(name)
+
     return MPI_LIB.horovod_allgather(tensor, name=name)
 
 
