@@ -16,6 +16,7 @@
 import tensorflow as tf
 
 from distutils.version import LooseVersion
+
 if LooseVersion(tf.__version__) >= LooseVersion("1.4.0"):
     from tensorflow import keras
     from tensorflow.python.keras import backend as K
@@ -38,33 +39,7 @@ import horovod._keras as _impl
 from horovod.tensorflow.keras import callbacks
 
 
-def DistributedOptimizer(optimizer, name=None,
-                         device_dense='', device_sparse='',
-                         compression=Compression.none,
-                         sparse_as_dense=False):
-    """
-    An optimizer that wraps another keras.optimizers.Optimizer, using an allreduce to
-    average gradient values before applying gradients to model weights.
-
-    Args:
-        optimizer: Optimizer to use for computing gradients and applying updates.
-        name: Optional name prefix for the operations created when applying
-              gradients. Defaults to "Distributed" followed by the provided
-              optimizer type.
-        device_dense: Device to be used for dense tensors. Uses GPU by default
-                      if Horovod was build with HOROVOD_GPU_ALLREDUCE.
-        device_sparse: Device to be used for sparse tensors. Uses GPU by default
-                       if Horovod was build with HOROVOD_GPU_ALLGATHER.
-        compression: Compression algorithm used to reduce the amount of data
-                     sent and received by each worker node.  Defaults to not
-                     using compression.
-        sparse_as_dense: Treat all sparse gradients as dense tensors.  This can
-                         help improve performance and memory utilization if
-                         the original sparse gradient has high density.
-                         Defaults to false.    """
-    return _impl.create_distributed_optimizer(keras, optimizer, name,
-                                              device_dense, device_sparse, compression,
-                                              sparse_as_dense)
+DistributedOptimizer = _impl.create_distributed_optimizer(keras)
 
 
 def broadcast_global_variables(root_rank):
@@ -120,7 +95,7 @@ def broadcast(value, root_rank, name=None):
     return _impl.broadcast(K, value, root_rank, name)
 
 
-def load_model(filepath, custom_optimizers=None, custom_objects=None, compression=Compression.none):
+def load_model(filepath, custom_optimizers=None, custom_objects=None):
     """
     Loads a saved Keras model with a Horovod DistributedOptimizer.
 
@@ -151,7 +126,5 @@ def load_model(filepath, custom_optimizers=None, custom_objects=None, compressio
         ImportError: If h5py is not available.
         ValueError: In case of an invalid savefile.
     """
-    def wrap_optimizer(cls):
-        return lambda **kwargs: DistributedOptimizer(cls(**kwargs), compression=compression)
-    return _impl.load_model(keras, wrap_optimizer, filepath, custom_optimizers, custom_objects)
 
+    return _impl.load_model(keras, filepath, custom_optimizers, custom_objects)
