@@ -41,14 +41,28 @@ class CMakeExtension(Extension):
         Extension.__init__(self, name, sources=sources, **kwa)
         self.cmake_lists_dir = os.path.abspath(cmake_lists_dir)
 
+if not os.environ.get('HOROVOD_WITHOUT_TENSORFLOW'):
+    tensorflow_mpi_lib = Extension('horovod.tensorflow.mpi_lib', [])
+else:
+    tensorflow_mpi_lib = None
 
-tensorflow_mpi_lib = Extension('horovod.tensorflow.mpi_lib', [])
-torch_mpi_lib = Extension('horovod.torch.mpi_lib', [])
-torch_mpi_lib_impl = Extension('horovod.torch.mpi_lib_impl', [])
-torch_mpi_lib_v2 = Extension('horovod.torch.mpi_lib_v2', [])
-mxnet_mpi_lib = Extension('horovod.mxnet.mpi_lib', [])
-gloo_lib = CMakeExtension('gloo', cmake_lists_dir='third_party/gloo',
-                          sources=[])
+if not os.environ.get('HOROVOD_WITHOUT_PYTORCH'):
+    torch_mpi_lib = Extension('horovod.torch.mpi_lib', [])
+    torch_mpi_lib_impl = Extension('horovod.torch.mpi_lib_impl', [])
+    torch_mpi_lib_v2 = Extension('horovod.torch.mpi_lib_v2', [])
+else:
+    torch_mpi_lib = torch_mpi_lib_impl = torch_mpi_lib_v2 = None
+
+if not os.environ.get('HOROVOD_WITHOUT_MXNET'):
+    mxnet_mpi_lib = Extension('horovod.mxnet.mpi_lib', [])
+else:
+    mxnet_mpi_lib = None
+
+if not os.environ.get('HOROVOD_WITHOUT_GLOO'):
+    gloo_lib = CMakeExtension('gloo', cmake_lists_dir='third_party/gloo',
+                              sources=[])
+else:
+    gloo_lib = None
 
 ccl_root = os.environ.get('CCL_ROOT')
 have_ccl = ccl_root is not None
@@ -65,6 +79,9 @@ def is_build_action():
         return True
 
     if sys.argv[1].startswith('install'):
+        return True
+
+    if sys.argv[1].startswith('develop'):
         return True
 
 
@@ -1315,6 +1332,10 @@ def build_torch_extension(build_ext, global_options, torch_version):
 
     for ffi, setuptools_ext in [(ffi_iface, torch_mpi_lib),
                                 (ffi_impl, torch_mpi_lib_impl)]:
+
+        if setuptools_ext is None:
+            continue
+
         ffi_ext = ffi.distutils_extension()
         # ffi_ext is distutils Extension, not setuptools Extension
         for k, v in ffi_ext.__dict__.items():
@@ -1397,64 +1418,65 @@ def build_torch_extension_v2(build_ext, global_options, torch_version):
         # CUDAExtension fails with `ld: library not found for -lcudart` if CUDA is not present
         from torch.utils.cpp_extension import CppExtension as TorchExtension
 
-    ext = TorchExtension(torch_mpi_lib_v2.name,
-                         define_macros=updated_macros,
-                         include_dirs=options['INCLUDES'],
-                         sources=options['SOURCES'] + [
-                            'horovod/torch/mpi_ops_v2.cc',
-                            'horovod/torch/handle_manager.cc',
-                            'horovod/torch/ready_event.cc',
-                            'horovod/torch/cuda_util.cc',
-                            'horovod/torch/adapter_v2.cc'],
-                         extra_compile_args=compile_flags,
-                         extra_link_args=options['LINK_FLAGS'],
-                         library_dirs=options['LIBRARY_DIRS'],
-                         libraries=options['LIBRARIES'])
+    if torch_mpi_lib_v2 is not None:
+        ext = TorchExtension(torch_mpi_lib_v2.name,
+                             define_macros=updated_macros,
+                             include_dirs=options['INCLUDES'],
+                             sources=options['SOURCES'] + [
+                                'horovod/torch/mpi_ops_v2.cc',
+                                'horovod/torch/handle_manager.cc',
+                                'horovod/torch/ready_event.cc',
+                                'horovod/torch/cuda_util.cc',
+                                'horovod/torch/adapter_v2.cc'],
+                             extra_compile_args=compile_flags,
+                             extra_link_args=options['LINK_FLAGS'],
+                             library_dirs=options['LIBRARY_DIRS'],
+                             libraries=options['LIBRARIES'])
 
-    # Patch an existing torch_mpi_lib_v2 extension object.
-    for k, v in ext.__dict__.items():
-        torch_mpi_lib_v2.__dict__[k] = v
+        # Patch an existing torch_mpi_lib_v2 extension object.
+        for k, v in ext.__dict__.items():
+            torch_mpi_lib_v2.__dict__[k] = v
 
-    cc_compiler = cxx_compiler = cflags = cppflags = ldshared = None
-    if sys.platform.startswith('linux') and not os.getenv('CC') and not os.getenv('CXX'):
-        from torch.utils.cpp_extension import check_compiler_abi_compatibility
+        cc_compiler = cxx_compiler = cflags = cppflags = ldshared = None
+        if sys.platform.startswith('linux') and not os.getenv('CC') and not os.getenv('CXX'):
+            from torch.utils.cpp_extension import check_compiler_abi_compatibility
 
-        # Find the compatible compiler of the highest version
-        compiler_version = LooseVersion('0')
-        for candidate_cxx_compiler, candidate_compiler_version in find_gxx_compiler_in_path():
-            if check_compiler_abi_compatibility(candidate_cxx_compiler):
-                candidate_cc_compiler = \
-                    find_matching_gcc_compiler_path(candidate_compiler_version)
-                if candidate_cc_compiler and candidate_compiler_version > compiler_version:
-                    cc_compiler = candidate_cc_compiler
-                    cxx_compiler = candidate_cxx_compiler
-                    compiler_version = candidate_compiler_version
+            # Find the compatible compiler of the highest version
+            compiler_version = LooseVersion('0')
+            for candidate_cxx_compiler, candidate_compiler_version in find_gxx_compiler_in_path():
+                if check_compiler_abi_compatibility(candidate_cxx_compiler):
+                    candidate_cc_compiler = \
+                        find_matching_gcc_compiler_path(candidate_compiler_version)
+                    if candidate_cc_compiler and candidate_compiler_version > compiler_version:
+                        cc_compiler = candidate_cc_compiler
+                        cxx_compiler = candidate_cxx_compiler
+                        compiler_version = candidate_compiler_version
+                else:
+                    print('INFO: Compiler %s (version %s) is not usable for this PyTorch '
+                          'installation, see the warning above.' %
+                          (candidate_cxx_compiler, candidate_compiler_version))
+
+            if cc_compiler:
+                print('INFO: Compilers %s and %s (version %s) selected for PyTorch plugin build.'
+                      '' % (cc_compiler, cxx_compiler, compiler_version))
             else:
-                print('INFO: Compiler %s (version %s) is not usable for this PyTorch '
-                      'installation, see the warning above.' %
-                      (candidate_cxx_compiler, candidate_compiler_version))
+                raise DistutilsPlatformError(
+                    'Could not find compiler compatible with this PyTorch installation.\n'
+                    'Please check the Horovod website for recommended compiler versions.\n'
+                    'To force a specific compiler version, set CC and CXX environment variables.')
 
-        if cc_compiler:
-            print('INFO: Compilers %s and %s (version %s) selected for PyTorch plugin build.'
-                  '' % (cc_compiler, cxx_compiler, compiler_version))
-        else:
-            raise DistutilsPlatformError(
-                'Could not find compiler compatible with this PyTorch installation.\n'
-                'Please check the Horovod website for recommended compiler versions.\n'
-                'To force a specific compiler version, set CC and CXX environment variables.')
+            cflags, cppflags, ldshared = remove_offensive_gcc_compiler_options(compiler_version)
 
-        cflags, cppflags, ldshared = remove_offensive_gcc_compiler_options(compiler_version)
-
-    try:
-        with env(CC=cc_compiler, CXX=cxx_compiler, CFLAGS=cflags, CPPFLAGS=cppflags,
-                 LDSHARED=ldshared):
-            if options['BUILD_GLOO']:
-                build_cmake(build_ext, gloo_lib, 'torchv2', gloo_abi_flag, options, torch_mpi_lib_v2)
+        try:
+            with env(CC=cc_compiler, CXX=cxx_compiler, CFLAGS=cflags, CPPFLAGS=cppflags,
+                     LDSHARED=ldshared):
+                if options['BUILD_GLOO']:
+                    build_cmake(build_ext, gloo_lib, 'torchv2', gloo_abi_flag, options, torch_mpi_lib_v2)
+                customize_compiler(build_ext.compiler)
+                build_ext.build_extension(torch_mpi_lib_v2)
+        finally:
+            # Revert to the default compiler settings
             customize_compiler(build_ext.compiler)
-            build_ext.build_extension(torch_mpi_lib_v2)
-    finally:
-        # Revert to the default compiler settings
-        customize_compiler(build_ext.compiler)
 
 
 def get_cmake_bin():
@@ -1623,8 +1645,10 @@ setup(name='horovod',
           'Intended Audience :: Developers',
           'Topic :: Scientific/Engineering :: Artificial Intelligence',
       ],
-      ext_modules=[tensorflow_mpi_lib, torch_mpi_lib, torch_mpi_lib_impl,
-                   torch_mpi_lib_v2, mxnet_mpi_lib, gloo_lib],
+      ext_modules=[ext for ext in [tensorflow_mpi_lib, torch_mpi_lib,
+        torch_mpi_lib_impl, torch_mpi_lib_v2, mxnet_mpi_lib, gloo_lib]
+        if ext is not None
+      ],
       cmdclass={'build_ext': custom_build_ext},
       # cffi is required for PyTorch
       # If cffi is specified in setup_requires, it will need libffi to be installed on the machine,
